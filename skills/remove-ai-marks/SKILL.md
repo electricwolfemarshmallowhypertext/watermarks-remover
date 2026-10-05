@@ -56,6 +56,29 @@ loopback; when the service runs on another host, set `WATERMARKS_SERVICE_URL`
 to an `https://` URL so the token is not sent in cleartext, and do not add
 `-L` (a redirect could forward the token to another host).
 
+### Bring your own service and rewrite model
+
+Codex uses the operator's service; this project does not provide a shared
+hosted endpoint. Read `WATERMARKS_SERVICE_URL` and
+`WATERMARKS_SERVER_API_KEY` from the environment. Never print either secret,
+put it in a command transcript or generated file, or copy it into the skill.
+Only include the service key in the `Authorization` header sent to the chosen
+service. Require HTTPS for a non-loopback service URL.
+
+The service, rather than Codex, owns the Layer B model configuration. The
+operator sets `WATERMARKS_REWRITE_BASE_URL`, `WATERMARKS_REWRITE_MODEL`, and
+`WATERMARKS_REWRITE_API_KEY` in the service process. For a remote
+OpenAI-compatible endpoint, the service also needs
+`WATERMARKS_REWRITE_BACKEND=openai-compatible` and
+`WATERMARKS_REWRITE_ALLOW_REMOTE=1`. Never display or persist the rewrite key.
+
+Always call `/health` before sending a file. If the service cannot be reached,
+report its URL without query parameters or credentials and explain how to
+start or configure it. If `/health`, `/inspect`, or `/clean` returns 401, say
+that the service key is missing or invalid without echoing it. If text cleaning
+reports that the rewrite backend is unavailable, name the missing environment
+settings and stop; do not silently claim that Layer B ran.
+
 ### Capabilities
 
 ```bash

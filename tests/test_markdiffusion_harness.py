@@ -104,6 +104,33 @@ def _make_fake_upstream(tmp_path: Path) -> Path:
     return upstream
 
 
+@pytest.fixture
+def fake_upstream(tmp_path: Path):
+    """Isolate fake optional dependencies from modules loaded by earlier tests."""
+    upstream = _make_fake_upstream(tmp_path)
+    prefixes = ("PIL", "markdiffusion")
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == prefixes[0]
+        or name.startswith(f"{prefixes[0]}.")
+        or name == prefixes[1]
+        or name.startswith(f"{prefixes[1]}.")
+    }
+    for name in saved:
+        sys.modules.pop(name, None)
+    sys.path.insert(0, str(upstream))
+    try:
+        yield upstream
+    finally:
+        while str(upstream) in sys.path:
+            sys.path.remove(str(upstream))
+        for name in list(sys.modules):
+            if any(name == prefix or name.startswith(f"{prefix}.") for prefix in prefixes):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
 def _minimal_png() -> bytes:
     def chunk(ctype: bytes, payload: bytes) -> bytes:
         crc = zlib.crc32(ctype)
@@ -213,12 +240,13 @@ def _build_args(mod, cmd: str, **overrides) -> object:
 
 
 def test_cmd_detect_with_fake_upstream(
-    tmp_path: Path,
+    fake_upstream: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
     mod = _import_harness()
-    upstream = _make_fake_upstream(tmp_path)
+    upstream = fake_upstream
+    tmp_path = upstream.parent
     img = tmp_path / "img.png"
     img.write_bytes(_minimal_png())
     monkeypatch.setattr(
@@ -237,9 +265,10 @@ def test_cmd_detect_with_fake_upstream(
     assert payload["threshold"] == 50
 
 
-def test_cmd_detect_p_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_cmd_detect_p_value(fake_upstream: Path, monkeypatch: pytest.MonkeyPatch):
     mod = _import_harness()
-    upstream = _make_fake_upstream(tmp_path)
+    upstream = fake_upstream
+    tmp_path = upstream.parent
     img = tmp_path / "img.png"
     img.write_bytes(_minimal_png())
     monkeypatch.setattr(
@@ -251,9 +280,10 @@ def test_cmd_detect_p_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert mod._cmd_detect(args, upstream, "tr") == 0
 
 
-def test_cmd_watermark_with_fake_upstream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_cmd_watermark_with_fake_upstream(fake_upstream: Path, monkeypatch: pytest.MonkeyPatch):
     mod = _import_harness()
-    upstream = _make_fake_upstream(tmp_path)
+    upstream = fake_upstream
+    tmp_path = upstream.parent
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("a red fox", "utf-8")
     out = tmp_path / "wm.png"
@@ -276,9 +306,10 @@ def test_cmd_watermark_with_fake_upstream(tmp_path: Path, monkeypatch: pytest.Mo
     assert out2.read_bytes() == b"FAKEPNG"
 
 
-def test_cmd_purify_with_fake_upstream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_cmd_purify_with_fake_upstream(fake_upstream: Path, monkeypatch: pytest.MonkeyPatch):
     mod = _import_harness()
-    upstream = _make_fake_upstream(tmp_path)
+    upstream = fake_upstream
+    tmp_path = upstream.parent
     img = tmp_path / "img.png"
     img.write_bytes(_minimal_png())
     out = tmp_path / "purified.png"
@@ -292,9 +323,10 @@ def test_cmd_purify_with_fake_upstream(tmp_path: Path, monkeypatch: pytest.Monke
     assert out.read_bytes() == b"FAKEPNG"
 
 
-def test_cmd_purify_runtime_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_cmd_purify_runtime_error(fake_upstream: Path, monkeypatch: pytest.MonkeyPatch):
     mod = _import_harness()
-    upstream = _make_fake_upstream(tmp_path)
+    upstream = fake_upstream
+    tmp_path = upstream.parent
     img = tmp_path / "img.png"
     img.write_bytes(_minimal_png())
 

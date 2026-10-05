@@ -72,20 +72,31 @@ def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def _post(conn: http.client.HTTPConnection, path: str, payload: dict) -> tuple[int, dict]:
+def _post(
+    conn: http.client.HTTPConnection,
+    path: str,
+    payload: dict,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict]:
+    request_headers = {"Content-Type": "application/json"}
+    request_headers.update(headers or {})
     conn.request(
         "POST",
         path,
         body=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=request_headers,
     )
     resp = conn.getresponse()
     data = resp.read()
     return resp.status, json.loads(data) if data else {}
 
 
-def _get(conn: http.client.HTTPConnection, path: str) -> tuple[int, dict]:
-    conn.request("GET", path)
+def _get(
+    conn: http.client.HTTPConnection,
+    path: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict]:
+    conn.request("GET", path, headers=headers or {})
     resp = conn.getresponse()
     data = resp.read()
     return resp.status, json.loads(data) if data else {}
@@ -484,12 +495,46 @@ def test_oversized_body_413(conn, monkeypatch):
 
 def test_auth_required(conn, monkeypatch):
     monkeypatch.setattr(server, "API_KEY", "sekret")
-    status, _ = _post(conn, "/health", {"anything": 1})
-    assert status == 401
-    conn.request("GET", "/health", headers={"Authorization": "Bearer sekret"})
-    resp = conn.getresponse()
-    assert resp.status == 200
-    resp.read()
+
+    def handle_inspect(handler, data, name, body):
+        handler._respond(200, {"ok": True, "kind": "text", "suspicious": {"verdict": True}})
+
+    def handle_clean(handler, data, name, body):
+        handler._respond(
+            200,
+            {
+                "ok": True,
+                "kind": "text",
+                "cleaned": _b64(b"HelloWorld!"),
+                "report": {},
+            },
+        )
+
+    monkeypatch.setattr(server.Handler, "_handle_inspect", handle_inspect)
+    monkeypatch.setattr(server.Handler, "_handle_clean", handle_clean)
+    auth = {"Authorization": "Bearer sekret"}
+    data = "Hello\u200bWorld\u00ad!".encode("utf-8")
+    payload = {"file": _b64(data), "name": "note.txt"}
+
+    for method in (
+        lambda: _get(conn, "/health"),
+        lambda: _post(conn, "/inspect", payload),
+        lambda: _post(conn, "/clean", payload),
+    ):
+        status, _ = method()
+        assert status == 401
+
+    status, body = _get(conn, "/health", auth)
+    assert status == 200
+    assert body["ok"] is True
+
+    status, body = _post(conn, "/inspect", payload, auth)
+    assert status == 200
+    assert body["suspicious"]["verdict"] is True
+
+    status, body = _post(conn, "/clean", payload, auth)
+    assert status == 200
+    assert base64.b64decode(body["cleaned"]).decode("utf-8") == "HelloWorld!"
 
 
 def test_404(conn):

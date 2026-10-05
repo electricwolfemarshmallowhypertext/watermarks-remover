@@ -860,6 +860,45 @@ def test_openai_compatible_sends_reasoning_effort_when_set():
         server.shutdown()
 
 
+def test_openai_compatible_sends_api_key_without_logging(capsys):
+    captured = {}
+    key = "sk-private-byok-value"
+
+    class Collector(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            captured["authorization"] = self.headers.get("Authorization")
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"choices": [{"message": {"content": "rewritten"}}]}')
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Collector)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result, _ = rewrite(
+            "hello",
+            **_rewrite_http_kwargs(
+                f"http://127.0.0.1:{server.server_address[1]}",
+                api_key=key,
+            ),
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    output = capsys.readouterr()
+    assert result == "rewritten"
+    assert captured["authorization"] == f"Bearer {key}"
+    assert key not in output.out
+    assert key not in output.err
+
+
 def test_rewrite_denies_remote_host_without_opt_in():
     with pytest.raises(SystemExit):
         rewrite("secret text", **_rewrite_http_kwargs("http://example.com:11434"))

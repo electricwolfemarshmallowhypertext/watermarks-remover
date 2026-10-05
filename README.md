@@ -92,6 +92,65 @@ requires an API key, set `WATERMARKS_SERVER_API_KEY` for the client.
 `clean-user-facing-text` is
 self-contained and does not need the service.
 
+#### Bring your own service and model
+
+There is no shared watermarks-remover service. You run it locally or at an
+HTTPS address you control, and you choose the OpenAI-compatible model used for
+Layer B rewriting. The service access key and model-provider key are separate:
+
+- Codex reads `WATERMARKS_SERVICE_URL` and `WATERMARKS_SERVER_API_KEY`.
+- The service process reads `WATERMARKS_REWRITE_BASE_URL`,
+  `WATERMARKS_REWRITE_MODEL`, and `WATERMARKS_REWRITE_API_KEY`.
+- A remote model endpoint also requires
+  `WATERMARKS_REWRITE_BACKEND=openai-compatible` and
+  `WATERMARKS_REWRITE_ALLOW_REMOTE=1` in the service process.
+
+Do not put keys in prompts, committed files, skill files, or command-line
+arguments. Use HTTPS for any service or model endpoint outside the local
+computer.
+
+For macOS or Linux, set the service variables before starting Codex. Set the
+rewrite variables in the shell that starts the cleaning service:
+
+```bash
+export WATERMARKS_SERVICE_URL="https://watermarks.example.com"
+export WATERMARKS_SERVER_API_KEY="your-service-key"
+
+export WATERMARKS_REWRITE_BACKEND="openai-compatible"
+export WATERMARKS_REWRITE_BASE_URL="https://api.example.com"
+export WATERMARKS_REWRITE_MODEL="your-model"
+export WATERMARKS_REWRITE_API_KEY="your-model-key"
+export WATERMARKS_REWRITE_ALLOW_REMOTE=1
+make serve
+```
+
+For a local service, omit `WATERMARKS_SERVICE_URL`; it defaults to
+`http://127.0.0.1:8765`. On Windows PowerShell, set variables for the current
+process before starting the service:
+
+```powershell
+$env:WATERMARKS_REWRITE_BACKEND = "openai-compatible"
+$env:WATERMARKS_REWRITE_BASE_URL = "https://api.example.com"
+$env:WATERMARKS_REWRITE_MODEL = "your-model"
+$env:WATERMARKS_REWRITE_API_KEY = "your-model-key"
+$env:WATERMARKS_REWRITE_ALLOW_REMOTE = "1"
+py service/scripts/server.py --host 127.0.0.1 --port 8765
+```
+
+For Codex desktop on Windows, set `WATERMARKS_SERVICE_URL` and
+`WATERMARKS_SERVER_API_KEY` as user environment variables, then fully restart
+Codex so it inherits them. On macOS or Linux, launch Codex from an environment
+that exports the same two variables, then restart it after any change.
+
+The skill checks `/health` before uploading a file. An unreachable service is
+reported as unavailable; HTTP 401 is reported as a missing or invalid service
+key. Text cleaning fails clearly when the service lacks working rewrite-model
+settings. Keys are sent only to their configured endpoints and are not written
+to output files.
+
+This is Codex and local-agent support. Cloud ChatGPT cannot reach a private or
+local service without a separately configured remote connection.
+
 ### Automatic cleaning via hook (deterministic)
 
 A skill is an instruction: the model decides whether to invoke it, and the
